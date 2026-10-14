@@ -74,6 +74,6 @@ The CLI checks the authorized roster, stores a salted scrypt hash in `/data/user
 
 Run a single service instance. Back up SQLite consistently using the SQLite backup API/tooling or stop the service before copying its database and WAL. Keep encrypted off-host backups and test restoration; a same-disk copy alone is not disaster recovery. Back up the account hash file securely too.
 
-Monitor failed `sync_runs` and alert when last successful sync is older than two hours. These records are stored, but external alerting and off-host backups still require hosting configuration. Initial discovery conservatively scans all older Shopify orders; measure runtime and API usage on Cadense's store before rollout, and optimize discovery if it cannot comfortably complete within an hour.
+Monitor failed `sync_runs` and alert when last successful sync is older than two hours. These records are stored, but external alerting and off-host backups still require hosting configuration. Initial discovery excludes fully fulfilled and canceled orders, while all tracked IDs including history are refreshed; measure runtime and API usage on Cadense's store before rollout, and optimize discovery if it cannot comfortably complete within an hour.
 
 Historical access must be verified against a known order older than 60 days before rollout. `SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE=false` supports merchant-created apps; set it to `true` for partner-created apps and obtain the separate permission. Shopify clarification: https://community.shopify.dev/t/read-all-orders-through-admin-api/28964/5
