@@ -39,3 +39,5 @@ services:
         sync: false
       - key: AUTHORIZED_USERS_JSON
         sync: false
+      - key: SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE
+        value: "false"

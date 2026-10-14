@@ -39,7 +39,7 @@ For UI development, run the backend as above, then `npm run dev` (Vite proxies `
 Store domain is preconfigured as `cadenseadaptive.myshopify.com` in `.env.example`. Provision an app/token using Shopify's current app installation process. Configure these **read-only** scopes:
 
 - `read_orders`
-- `read_all_orders` (requires approval; otherwise Shopify generally limits accessible orders to the last 60 days)
+- `read_all_orders` only for partner-created apps (requires approval). Merchant-created Dev Dashboard apps can read historical orders with `read_orders`.
 - `read_merchant_managed_fulfillment_orders`
 - `read_third_party_fulfillment_orders`
 
@@ -93,3 +93,5 @@ Twelve automated cases cover strict >168-hour eligibility, physical items, parti
 Black/white, eucalyptus `#28EAB6` from the attached brand guide, neutral backgrounds, and approved Arial fallback. The brief's teal `#28EAB7` differs by one blue-channel step; the PDF brand palette is used. No licensed Calibre font or original logo file was supplied; the interface uses an editable typographic Cadense name, not an extracted/stretched logo. Primary task: oldest-first overdue queue, subtle age cues, searchable/filterable table, detail drawer, CX follow-up workflow, and history.
 
 No Shopify order or inventory mutations. Existing Shopify Flow/Slack notifications continue independently.
+
+Historical access must be verified against a known order older than 60 days before rollout. `SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE=false` supports merchant-created apps; set it to `true` for partner-created apps and obtain the separate permission. Shopify clarification: https://community.shopify.dev/t/read-all-orders-through-admin-api/28964/5

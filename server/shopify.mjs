@@ -2,7 +2,7 @@ import {tokenProvider} from './shopify-token.mjs';
 const pageInfo='pageInfo { hasNextPage endCursor }';
 const fields=`id name createdAt cancelledAt displayFulfillmentStatus customer { displayName }`;
 export class Shopify{
- constructor({domain,token,clientId,clientSecret,version='2026-10',fetcher=fetch}){if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(domain||''))throw new Error('Invalid Shopify domain');this.url=`https://${domain}/admin/api/${version}/graphql.json`;this.getToken=tokenProvider({domain,accessToken:token,clientId,clientSecret,fetcher});this.fetcher=fetcher;}
+ constructor({domain,token,clientId,clientSecret,version='2026-10',fetcher=fetch,requireAllOrdersScope=false}){if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(domain||''))throw new Error('Invalid Shopify domain');this.url=`https://${domain}/admin/api/${version}/graphql.json`;this.getToken=tokenProvider({domain,accessToken:token,clientId,clientSecret,fetcher});this.fetcher=fetcher;this.requireAllOrdersScope=requireAllOrdersScope;}
  async query(query,variables={}){for(let attempt=0;attempt<5;attempt++){let response,json;try{response=await this.fetcher(this.url,{method:'POST',headers:{'Content-Type':'application/json','X-Shopify-Access-Token':await this.getToken()},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(30000)});json=await response.json();}catch{if(attempt===4)throw new Error('Shopify connection failed');await new Promise(r=>setTimeout(r,1000*2**attempt));continue;}
  if(response.status===429||response.status>=500||json.errors?.some(e=>e.extensions?.code==='THROTTLED')){if(attempt===4)throw new Error('Shopify temporarily unavailable');await new Promise(r=>setTimeout(r,Math.min(30000,Math.max(1000*2**attempt,Number(response.headers.get('retry-after')||0)*1000))));continue;}
  if(!response.ok||json.errors?.length||!json.data)throw new Error('Shopify query failed; verify scopes and API configuration');return json.data;}throw new Error('Shopify retry exhausted');}
@@ -16,7 +16,10 @@ export class Shopify{
  async snapshots(trackedIds,threshold=7){
  const installation=await this.query('query { currentAppInstallation { accessScopes { handle } } }');
  const scopes=new Set(installation.currentAppInstallation?.accessScopes?.map(s=>s.handle)||[]);
- if(!['read_orders','read_all_orders','read_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders'].every(s=>scopes.has(s)))throw new Error('Required read-only Shopify permissions are missing');
+ const required=['read_orders','read_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders'];
+ // Merchant-created apps have historical access through read_orders. Partner apps require separate approval.
+ if(this.requireAllOrdersScope)required.push('read_all_orders');
+ if(!required.every(s=>scopes.has(s)))throw new Error('Required read-only Shopify permissions are missing');
  const cutoff=new Date(Date.now()-threshold*86400000).toISOString();
  // Scan all older orders, including fulfilled display statuses, to discover reversals reliably.
  const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:`created_at:<${cutoff} status:any`},d=>d.orders);
