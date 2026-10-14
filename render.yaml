@@ -1,0 +1,41 @@
+# Paid always-on service; review the cost in Render before creation.
+services:
+  - type: web
+    name: cadense-unshipped-orders
+    runtime: docker
+    plan: 0.5c-512mb
+    region: oregon
+    branch: production-render
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"
+    numInstances: 1
+    disk:
+      name: cadense-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: DATABASE_PATH
+        value: /data/cadense.sqlite
+      - key: USERS_FILE
+        value: /data/users.json
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SHOPIFY_STORE_DOMAIN
+        value: cadenseadaptive.myshopify.com
+      - key: SHOPIFY_API_VERSION
+        value: "2026-10"
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: AUTHORIZED_USERS_JSON
+        sync: false
