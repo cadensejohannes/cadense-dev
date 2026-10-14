@@ -39,6 +39,7 @@ For UI development, run the backend as above, then `npm run dev` (Vite proxies `
 Store domain is preconfigured as `cadenseadaptive.myshopify.com` in `.env.example`. Provision an app/token using Shopify's current app installation process. Configure these **read-only** scopes:
 
 - `read_orders`
+- `read_customers` (required for the customer name queried by the dashboard)
 - `read_all_orders` only for partner-created apps (requires approval). Merchant-created Dev Dashboard apps can read historical orders with `read_orders`.
 - `read_merchant_managed_fulfillment_orders`
 - `read_third_party_fulfillment_orders`

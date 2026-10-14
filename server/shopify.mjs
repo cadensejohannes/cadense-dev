@@ -17,7 +17,7 @@ export class Shopify{
  async snapshots(trackedIds,threshold=7){
  const installation=await this.query('query { currentAppInstallation { accessScopes { handle } } }',{},'Installed app permissions');
  const scopes=new Set(installation.currentAppInstallation?.accessScopes?.map(s=>s.handle)||[]);
- const required=['read_orders','read_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders'];
+ const required=['read_orders','read_customers','read_merchant_managed_fulfillment_orders','read_third_party_fulfillment_orders'];
  // Merchant-created apps have historical access through read_orders. Partner apps require separate approval.
  if(this.requireAllOrdersScope)required.push('read_all_orders');
  const missing=required.filter(s=>!scopes.has(s));

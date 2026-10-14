@@ -17,6 +17,7 @@ Use Cadense's own Shopify organization at https://dev.shopify.com/dashboard. Cre
 Required scopes for this merchant-created app:
 
 - `read_orders`
+- `read_customers` (required for the customer name queried by the dashboard)
 - For partner-created apps only: `read_all_orders`, after Shopify approval. Merchant-created Dev Dashboard apps do not require this separate scope.
 - `read_merchant_managed_fulfillment_orders`
 - `read_third_party_fulfillment_orders`
