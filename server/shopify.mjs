@@ -1,7 +1,7 @@
 import {SyncError,safeSyncMessage,graphqlFailure} from './sync-errors.mjs';
 import {tokenProvider} from './shopify-token.mjs';
 const pageInfo='pageInfo { hasNextPage endCursor }';
-const fields=`id name createdAt cancelledAt displayFulfillmentStatus customer { displayName }`;
+const fields=`id name tags createdAt cancelledAt displayFulfillmentStatus customer { displayName }`;
 export class Shopify{
  constructor({domain,token,clientId,clientSecret,version='2026-10',fetcher=fetch,requireAllOrdersScope=false}){if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(domain||''))throw new Error('Invalid Shopify domain');this.url=`https://${domain}/admin/api/${version}/graphql.json`;this.getToken=tokenProvider({domain,accessToken:token,clientId,clientSecret,fetcher});this.fetcher=fetcher;this.requireAllOrdersScope=requireAllOrdersScope;}
  async query(query,variables={},stage='Shopify data'){for(let attempt=0;attempt<5;attempt++){const token=await this.getToken();let response,json;try{response=await this.fetcher(this.url,{method:'POST',headers:{'Content-Type':'application/json','X-Shopify-Access-Token':token},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(30000)});json=await response.json();}catch{if(attempt===4)throw new SyncError('SHOPIFY_API_NETWORK',`${stage}: could not reach Shopify or read its response.`);await new Promise(r=>setTimeout(r,1000*2**attempt));continue;}

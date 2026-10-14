@@ -96,3 +96,7 @@ Black/white, eucalyptus `#28EAB6` from the attached brand guide, neutral backgro
 No Shopify order or inventory mutations. Existing Shopify Flow/Slack notifications continue independently.
 
 Historical access must be verified against a known order older than 60 days before rollout. `SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE=false` supports merchant-created apps; set it to `true` for partner-created apps and obtain the separate permission. Shopify clarification: https://community.shopify.dev/t/read-all-orders-through-admin-api/28964/5
+
+## Preorder exclusions
+
+Settings → Excluded order tags lets administrators maintain up to 50 exact order-tag exclusions. `FWCOL26PRE` is preconfigured. Matching is case-insensitive and affects the active queue and summary metrics, not fulfillment disposition. The active queue has a Show excluded orders control. Shopify tags appear in order details and refresh during successful syncs. Excluded orders continue to sync and retain all notes, contacts, CX statuses, and history. Clearing an exclusion restores an otherwise active order immediately using its stored tags; removing a tag in Shopify restores it after synchronization. Exclusion settings are stored separately in SQLite and survive deployments. Older snapshots without tags need a successful sync before exclusions can match them.
