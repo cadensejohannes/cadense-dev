@@ -42,4 +42,4 @@ services:
       - key: SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE
         value: "false"
       - key: APP_RELEASE
-        value: "order-ops-v2-20261014"
+        value: "order-ops-v3-20261015"

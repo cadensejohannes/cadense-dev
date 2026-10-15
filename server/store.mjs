@@ -2,7 +2,7 @@ import {recordMetricSnapshot} from './metrics.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
-export const statuses=['Needs Follow-Up','Awaiting 3PL Response','Follow-Up Required','Resolved'];
+export const statuses=['Needs Follow-Up','Awaiting 3PL Response','Follow-Up Required','Customer Waiting for Inbound Inventory','Resolved'];
 export function openStore(path){
  if(path!==':memory:')mkdirSync(dirname(path),{recursive:true});
  const db=new DatabaseSync(path);db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
