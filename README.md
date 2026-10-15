@@ -4,7 +4,7 @@ A responsive, brand-aligned CX workspace with a secure read-only Shopify backend
 
 ## Status
 
-The source builds and automated logic/API checks pass. Render deployment configuration is included in `render.yaml`. Live Shopify synchronization has **not** been verified: no Shopify token or team account list was provided. This environment did not have the Sites setup/publishing helpers, so this deliverable is a runnable deployment package, not a hosted production URL. Browser visual QA was not performed. Sample data is explicitly labeled and cannot run in production mode.
+The source builds and automated logic/API checks pass. Render deployment configuration is included in `render.yaml`. Live Shopify synchronization has **not** been verified: no Shopify token or team account list was provided. This environment did not have the Sites setup/publishing helpers, so this deliverable is a runnable deployment package, not a hosted production URL. Local desktop/mobile browser QA passed for login, sorting, completed orders, and administrator account creation. Production authenticated browser QA requires team access. Sample data is explicitly labeled and cannot run in production mode.
 
 ## Architecture
 
@@ -54,17 +54,13 @@ The sync checks granted scopes before fetching, discovers older orders not marke
 
 ## Team authentication
 
-Access is limited to explicitly provisioned accounts whose email and role also appear in the private `AUTHORIZED_USERS_JSON` hosting environment variable. This is an array of objects, for example `[{"email":"admin@example.com","role":"admin"},{"email":"agent@example.com","role":"member"}]`. Do not commit employee email lists to a public repository. On the first launch only, `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` create the initial authorized admin account on persistent disk; use a 12+ character password and remove the bootstrap password from hosting configuration afterward. Existing accounts are never overwritten on redeployment. Passwords use salted scrypt hashes; signed HttpOnly SameSite cookies expire after eight hours. Login attempts are rate-limited per socket address. Only admins can manually trigger Shopify sync; members can manage CX follow-ups. There is no public registration. Accounts are reread on each request so removal revokes access. Configure HTTPS and `NODE_ENV=production` for Secure cookies. Set a random `SESSION_SECRET` of at least 32 characters in managed secrets. Changing it revokes every session.
+Access is restricted to provisioned accounts in the persistent SQLite team database. The initial `AUTHORIZED_USERS_JSON` email/role roster and legacy `/data/users.json` credential hashes are migrated once. The approved administrator's password is preserved, and unprovisioned approved members appear in Settings as Password not set. Subsequent environment-roster changes do not overwrite account management in Settings.
 
-Provision users by feeding a password via stdin rather than passing it in command arguments. For interactive Linux setup:
+Administrators use **Settings → Team access** to add Cadense colleagues, set temporary passwords, change member/admin roles, deactivate/reactivate users, and reset passwords. The backend checks authorization independently of the UI. The last active, provisioned administrator cannot be demoted or deactivated. Temporary passwords must be changed before using the workspace. Passwords use salted scrypt hashes; signed HttpOnly SameSite cookies expire after eight hours. Password changes, resets, role changes, and deactivation invalidate earlier sessions. The account-management audit never stores passwords.
 
-```sh
-read -s -p 'New password (12+ characters): ' CADENSE_NEW_PASSWORD
-printf '%s' "$CADENSE_NEW_PASSWORD" | USERS_FILE=/data/users.json node server/create-user.mjs agent@cadense.com admin
-unset CADENSE_NEW_PASSWORD
-```
+Provision the first admin with `INITIAL_ADMIN_EMAIL` and a private 12+ character `INITIAL_ADMIN_PASSWORD` only when the credential store is empty. Protect both settings with managed secrets. After first login, remove the bootstrap password from hosting configuration. Set a random `SESSION_SECRET` of at least 32 characters. Changing it signs everyone out. Configure HTTPS and `NODE_ENV=production` for Secure cookies. The app sends no invitation emails; share temporary passwords through your approved private channel.
 
-Use `member` instead of `admin` for ordinary team accounts. Protect `users.json` with filesystem permissions. Configure the reverse proxy to set `X-Forwarded-Proto: https`, preserve the Host header, and rate-limit login at the edge as well. The app rejects browser requests from a different origin. Do not expose the backend over unencrypted public HTTP. Shared-session auth is suitable for this small MVP; SSO/MFA and distributed edge login throttling are future production hardening options if Cadense requires them.
+Login attempts are rate-limited per socket address; add edge throttling at the reverse proxy. No public self-registration, SSO, MFA, or email password recovery is implemented. Members can change their own password in Settings but cannot access account-management endpoints.
 
 ## Deploy
 
@@ -87,7 +83,7 @@ npm test
 npm run build
 ```
 
-Seventeen automated cases cover strict >168-hour eligibility, physical items, partial/resolved retention, unique IDs, closure/reversal/history, failed sync preservation, missing records, sync overlap, malformed pagination, restart persistence, password hashing, session tampering, token cache/renewal/failure recovery, and secure administrator bootstrap. Local HTTP smoke checks additionally verified dashboard data, follow-up persistence, activity, resolved retention, demo sync guard, and static assets. Live Shopify and visual browser verification remain outstanding.
+Thirty-two automated cases cover strict >168-hour eligibility, physical items, partial/resolved retention, unique IDs, closure/reversal/history, failed sync preservation, missing records, sync overlap, malformed pagination, restart persistence, password hashing, session tampering, token cache/renewal/failure recovery, and secure administrator bootstrap. Local HTTP smoke checks additionally verified dashboard data, follow-up persistence, activity, resolved retention, demo sync guard, and static assets. Live Shopify and visual browser verification remain outstanding.
 
 ## Design and scope
 
@@ -100,3 +96,11 @@ Historical access must be verified against a known order older than 60 days befo
 ## Preorder exclusions
 
 Settings → Excluded order tags lets administrators maintain up to 50 exact order-tag exclusions. `FWCOL26PRE` is preconfigured. Matching is case-insensitive and affects the active queue and summary metrics, not fulfillment disposition. The active queue has a Show excluded orders control. Shopify tags appear in order details and refresh during successful syncs. Excluded orders continue to sync and retain all notes, contacts, CX statuses, and history. Clearing an exclusion restores an otherwise active order immediately using its stored tags; removing a tag in Shopify restores it after synchronization. Exclusion settings are stored separately in SQLite and survive deployments. Older snapshots without tags need a successful sync before exclusions can match them.
+
+## Order Ops Dashboard release
+
+This release adds full ascending/descending column sorting, completed-order explanations, revised icons, a last-successful-update timestamp, seven-day metric comparisons, fulfilled-order bars and backlog movement, a live sync progress display, and administrator-managed Team access. The decorative header is removed. Follow-up and response targets are configurable in Settings.
+
+Existing account credentials are migrated once to SQLite without resetting passwords. Settings now manages accounts, roles, temporary passwords, and access activation. Temporary passwords must be changed at first login. Role changes, password resets, and deactivation invalidate prior sessions. Removing the last active admin is blocked. The environment allowlist seeds the team on migration; it no longer overwrites Settings changes on every deployment. See docs/PRODUCTION-SETUP.md for the updated operational model.
+
+Seven-day trends start collecting after this release and do not infer missing historic counts. Weekly confirmed fulfillment and cancellation counts are shown separately and use the tracker's observed dates. Current tag exclusions apply to those statistics.

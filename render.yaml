@@ -41,3 +41,5 @@ services:
         sync: false
       - key: SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE
         value: "false"
+      - key: APP_RELEASE
+        value: "order-ops-v2-20261014"

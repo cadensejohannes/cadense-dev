@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {SyncError,safeSyncMessage,graphqlFailure} from './sync-errors.mjs';
 import {tokenProvider} from './shopify-token.mjs';
 const pageInfo='pageInfo { hasNextPage endCursor }';
@@ -29,12 +30,21 @@ export class Shopify{
  const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:`created_at:<'${cutoff}' -fulfillment_status:fulfilled -status:cancelled`},d=>d.orders,'Overdue order discovery',count=>onProgress({stage:'discovering overdue candidates',discovered:count}));
  const ids=[...new Set([...found.map(o=>o.id),...trackedIds])];const snapshots=[];onProgress({stage:'fetching order details',processed:0,total:ids.length});for(const id of ids){snapshots.push(await this.order(id));if(snapshots.length%25===0||snapshots.length===ids.length)onProgress({stage:'fetching order details',processed:snapshots.length,total:ids.length});}return snapshots;}
 }
+export function syncState(db,now=Date.now()){
+ const lock=db.prepare("SELECT expires FROM locks WHERE name='sync'").get();
+ const raw=db.prepare("SELECT value FROM meta WHERE key='sync_progress'").get()?.value;let progress;try{progress=raw?JSON.parse(raw):null;}catch{progress=null;}
+ if(lock?.expires>now)return{...(progress||{}),status:'running'};
+ if(progress?.status==='running')return{...progress,status:'interrupted'};
+ return progress||{status:'idle'};
+}
 export async function synchronize(db,shopify,threshold=7){
- const now=Date.now();const lease=db.prepare("INSERT INTO locks(name,expires) VALUES('sync',?) ON CONFLICT(name) DO UPDATE SET expires=excluded.expires WHERE locks.expires<? RETURNING name").get(now+120000,now);if(!lease)return {busy:true};
- const heartbeat=setInterval(()=>db.prepare("UPDATE locks SET expires=? WHERE name='sync'").run(Date.now()+120000),30000);
- let stage='starting';const report=progress=>{stage=progress.stage;console.info('Shopify sync progress: '+JSON.stringify(progress));};
- const started=new Date().toISOString();report({stage});const run=db.prepare("INSERT INTO sync_runs(started,status) VALUES(?,'running')").run(started);
- try{const orders=await shopify.snapshots(db.prepare('SELECT id FROM orders').all().map(r=>r.id),threshold,report);report({stage:'saving records',total:orders.length});const {applySnapshot}=await import('./store.mjs');applySnapshot(db,orders,new Date().toISOString(),threshold);db.prepare("UPDATE sync_runs SET finished=?,status='success' WHERE id=?").run(new Date().toISOString(),run.lastInsertRowid);db.prepare("DELETE FROM meta WHERE key='sync_error'").run();report({stage:'complete',processed:orders.length,total:orders.length});return {success:true};}
- catch(e){db.prepare("UPDATE sync_runs SET finished=?,status='failed' WHERE id=?").run(new Date().toISOString(),run.lastInsertRowid);const detail=safeSyncMessage(e);db.prepare("INSERT INTO meta(key,value) VALUES('sync_error',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`Sync failed. Queue preserved. ${detail}`);console.error(`Shopify synchronization failed at ${stage}: ${detail}`);if(!(e instanceof SyncError)){const frames=String(e.stack||'').split('\n').filter(line=>/^\s+at /.test(line)).map(line=>line.match(/(?:file:\/\/)?[\w/.-]+\.mjs:\d+:\d+/)?.[0]).filter(Boolean);console.error('Sync failure source locations: '+JSON.stringify(frames.slice(0,6)));}throw e;}
- finally{clearInterval(heartbeat);db.prepare("DELETE FROM locks WHERE name='sync'").run();}
+ const now=Date.now(),owner=randomUUID();const lease=db.prepare("INSERT INTO locks(name,expires,owner) VALUES('sync',?,?) ON CONFLICT(name) DO UPDATE SET expires=excluded.expires,owner=excluded.owner WHERE locks.expires<? RETURNING name").get(now+120000,owner,now);if(!lease)return {busy:true};
+ let leaseLost=false;const assertLease=()=>{const lock=db.prepare("SELECT owner,expires FROM locks WHERE name='sync'").get();if(leaseLost||lock?.owner!==owner||lock.expires<Date.now())throw new SyncError('SYNC_LEASE_LOST','Synchronization lost its lock. No fetched records were applied; retry the sync.');};
+ const heartbeat=setInterval(()=>{try{const r=db.prepare("UPDATE locks SET expires=? WHERE name='sync' AND owner=?").run(Date.now()+120000,owner);if(!r.changes)leaseLost=true;}catch{leaseLost=true;}},30000);
+ const started=new Date().toISOString();db.prepare("UPDATE sync_runs SET status='interrupted',finished=? WHERE status='running'").run(started);
+ let stage='starting';const report=progress=>{assertLease();stage=progress.stage;const state={...progress,status:stage==='complete'?'complete':'running',startedAt:started,updatedAt:new Date().toISOString()};db.prepare("INSERT INTO meta(key,value) VALUES('sync_progress',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(state));console.info('Shopify sync progress: '+JSON.stringify(progress));};
+ const run=db.prepare("INSERT INTO sync_runs(started,status) VALUES(?,'running')").run(started);
+ try{report({stage});const orders=await shopify.snapshots(db.prepare('SELECT id FROM orders').all().map(r=>r.id),threshold,report);report({stage:'saving records',total:orders.length,processed:orders.length});const {applySnapshot}=await import('./store.mjs');applySnapshot(db,orders,new Date().toISOString(),threshold,assertLease);db.prepare("UPDATE sync_runs SET finished=?,status='success' WHERE id=?").run(new Date().toISOString(),run.lastInsertRowid);db.prepare("DELETE FROM meta WHERE key='sync_error'").run();report({stage:'complete',processed:orders.length,total:orders.length});return {success:true};}
+ catch(e){db.prepare("UPDATE sync_runs SET finished=?,status='failed' WHERE id=?").run(new Date().toISOString(),run.lastInsertRowid);const detail=safeSyncMessage(e);const current=db.prepare("SELECT owner FROM locks WHERE name='sync'").get();if(current?.owner===owner){db.prepare("INSERT INTO meta(key,value) VALUES('sync_error',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`Sync failed. Queue preserved. ${detail}`);db.prepare("INSERT INTO meta(key,value) VALUES('sync_progress',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify({stage,status:'failed',startedAt:started,updatedAt:new Date().toISOString()}));}console.error(`Shopify synchronization failed at ${stage}: ${detail}`);if(!(e instanceof SyncError)){const frames=String(e.stack||'').split('\n').filter(line=>/^\s+at /.test(line)).map(line=>line.match(/(?:file:\/\/)?[\w/.-]+\.mjs:\d+:\d+/)?.[0]).filter(Boolean);console.error('Sync failure source locations: '+JSON.stringify(frames.slice(0,6)));}throw e;}
+ finally{clearInterval(heartbeat);db.prepare("DELETE FROM locks WHERE name='sync' AND owner=?").run(owner);}
 }

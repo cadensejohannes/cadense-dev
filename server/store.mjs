@@ -1,3 +1,4 @@
+import {recordMetricSnapshot} from './metrics.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
@@ -7,14 +8,19 @@ export function openStore(path){
  const db=new DatabaseSync(path);db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, cx_status TEXT NOT NULL DEFAULT 'Needs Follow-Up', contact TEXT, entered TEXT NOT NULL, closed TEXT, disposition TEXT, checked TEXT);
  CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY, order_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS team_users(email TEXT PRIMARY KEY,role TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,password_hash TEXT,session_version INTEGER NOT NULL DEFAULT 0,must_change_password INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS team_audit(id INTEGER PRIMARY KEY,actor TEXT NOT NULL,target TEXT NOT NULL,action TEXT NOT NULL,at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT);
- CREATE TABLE IF NOT EXISTS locks(name TEXT PRIMARY KEY, expires INTEGER);
+ CREATE TABLE IF NOT EXISTS locks(name TEXT PRIMARY KEY, expires INTEGER, owner TEXT);
+ CREATE TABLE IF NOT EXISTS metric_snapshots(at TEXT NOT NULL, configuration TEXT NOT NULL, overdue INTEGER NOT NULL,needs_followup INTEGER,awaiting_response INTEGER,oldest_days INTEGER, PRIMARY KEY(at,configuration));
  CREATE TABLE IF NOT EXISTS sync_runs(id INTEGER PRIMARY KEY, started TEXT, finished TEXT, status TEXT);`);
+ if(!db.prepare('PRAGMA table_info(locks)').all().some(c=>c.name==='owner'))db.exec('ALTER TABLE locks ADD COLUMN owner TEXT');
+ const metricColumns=new Set(db.prepare('PRAGMA table_info(metric_snapshots)').all().map(c=>c.name));for(const column of ['needs_followup','awaiting_response','oldest_days'])if(!metricColumns.has(column))db.exec(`ALTER TABLE metric_snapshots ADD COLUMN ${column} INTEGER`);
  return db;
 }
 export function eligible(order,now=Date.now(),threshold=7){return !order.cancelledAt && now-Date.parse(order.createdAt)>threshold*86400000 && order.items.some(i=>i.requiresShipping&&i.remaining>0);}
-export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7){
- db.exec('BEGIN IMMEDIATE');try{
+export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7,guard=()=>{}){
+ db.exec('BEGIN IMMEDIATE');try{guard();
  for(const order of orders){
  const old=db.prepare('SELECT * FROM orders WHERE id=?').get(order.id);
  const active=eligible(order,Date.parse(now),threshold);
@@ -26,6 +32,7 @@ export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7
  else db.prepare('INSERT INTO orders(id,snapshot,entered,checked) VALUES(?,?,?,?)').run(order.id,JSON.stringify(order),now,now);
  if(old&&Boolean(old.closed)!==!active&& (active||disposition))db.prepare('INSERT INTO activity(order_id,kind,body,actor,at) VALUES(?,?,?,?,?)').run(order.id,'sync',active?'Returned to active queue':`Moved to history · ${disposition}`,'Shopify sync',now);
  }
+ recordMetricSnapshot(db,now);
  db.prepare("INSERT INTO meta(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(now);db.exec('COMMIT');
  }catch(e){db.exec('ROLLBACK');throw e;}
 }

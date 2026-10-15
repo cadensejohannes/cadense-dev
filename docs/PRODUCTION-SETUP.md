@@ -46,15 +46,13 @@ Initial startup creates only the administrator account if the persistent account
 
 ## 4. Member accounts
 
-Each approved member also needs a provisioned password hash. In the Render service shell, run this for each authorized member, entering their initial password privately:
+Existing approved credentials are migrated once from `/data/users.json` into the application's persistent SQLite database. The environment roster seeds the initial team; subsequent account changes are managed in **Settings → Team access**, available only to administrators.
 
-```sh
-read -s -p 'Member initial password (12+ characters): ' CADENSE_MEMBER_PASSWORD
-printf '%s' "$CADENSE_MEMBER_PASSWORD" | node server/create-user.mjs member@example.com member
-unset CADENSE_MEMBER_PASSWORD
-```
+Use Set password for each approved member who has not been provisioned, or Add team member for a new Cadense colleague. The UI supports member/admin roles, activation/deactivation, and password reset. Temporary passwords require a password change at first login. Reset, role change, and deactivation revoke existing sessions. The last active, provisioned administrator cannot be demoted or deactivated. The backend enforces all permissions independently of UI visibility. Access changes are audited without recording passwords.
 
-The CLI checks the authorized roster, stores a salted scrypt hash in `/data/users.json`, and never prints the password. Provide credentials to members through Cadense's approved private channel. No automated messages are sent by this application. Password self-service and SSO are not implemented; provision and update accounts through administration tooling for this MVP.
+Accounts added through the UI must use `@cadense.com` (override `TEAM_EMAIL_DOMAIN` in hosting configuration if Cadense explicitly authorizes another domain). Passwords are stored as salted scrypt hashes. Share temporary passwords through an approved private channel; this app sends no emails. Users can change their own password in Settings.
+
+The original credential file is retained for rollback but is no longer authoritative after migration. Restoring an old application version after account changes also restores its legacy authentication behavior; plan recovery carefully. Back up SQLite to protect current account settings and order history.
 
 ## 5. Verification before team rollout
 
@@ -77,3 +75,13 @@ Run a single service instance. Back up SQLite consistently using the SQLite back
 Monitor failed `sync_runs` and alert when last successful sync is older than two hours. These records are stored, but external alerting and off-host backups still require hosting configuration. Initial discovery excludes fully fulfilled and canceled orders, while all tracked IDs including history are refreshed; measure runtime and API usage on Cadense's store before rollout, and optimize discovery if it cannot comfortably complete within an hour.
 
 Historical access must be verified against a known order older than 60 days before rollout. `SHOPIFY_REQUIRE_ALL_ORDERS_SCOPE=false` supports merchant-created apps; set it to `true` for partner-created apps and obtain the separate permission. Shopify clarification: https://community.shopify.dev/t/read-all-orders-through-admin-api/28964/5
+
+## Release and metrics
+
+`APP_RELEASE` in the Blueprint identifies the published application revision at `/healthz`. This release updates that configuration value to request a Blueprint-managed deployment. Future source-only pushes still do not auto-deploy because `autoDeployTrigger` is off. Render's separate Blueprint Auto Sync must be enabled to apply configuration updates automatically; if disabled, use Manual Sync on the Blueprint or Manual Deploy on the service.
+
+The dashboard now displays sync stages, processed/total orders, elapsed time, and interrupted leases. Manual sync starts a background task and returns immediately. All data changes commit only after fetching completes and the sync still owns its lease. A stale owner cannot delete a replacement lease or write fetched records.
+
+Daily-looking seven-day trends are computed from successful sync snapshots and require a comparable baseline around seven days earlier under the same tag exclusions. Unknown history is labeled, not backfilled. Weekly fulfillment graphics count unique currently fulfilled tracker orders by observed closure date, not carrier delivery. Cancellations and no-outstanding-item closures are separate. The bar chart uses Pacific calendar days and marks days before tracking began as unobserved. Changes in exclusions can change the included cohort; trend baselines require matching rules.
+
+Follow-up contact coverage and late 3PL responses use administrator-configurable targets (default three days, 1–30). These are recorded contact dates, not automatic proof of warehouse communication. Accounts, notes, CX statuses, exclusions, and metric rules are persisted separately from Shopify snapshots.
