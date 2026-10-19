@@ -104,3 +104,9 @@ This release adds full ascending/descending column sorting, completed-order expl
 Existing account credentials are migrated once to SQLite without resetting passwords. Settings now manages accounts, roles, temporary passwords, and access activation. Temporary passwords must be changed at first login. Role changes, password resets, and deactivation invalidate prior sessions. Removing the last active admin is blocked. The environment allowlist seeds the team on migration; it no longer overwrites Settings changes on every deployment. See docs/PRODUCTION-SETUP.md for the updated operational model.
 
 Seven-day trends start collecting after this release and do not infer missing historic counts. Weekly confirmed fulfillment and cancellation counts are shown separately and use the tracker's observed dates. Current tag exclusions apply to those statistics.
+
+### Watchlist
+
+The Watchlist includes unshipped physical orders after three weekdays, excluding the placement day and weekends, using America/Los_Angeles calendar dates. Public holidays count as weekdays. At more than the configured overdue threshold (seven elapsed calendar days by default), an order moves to the overdue queue. Partial shipments remain tracked. Tag exclusions apply to both queues.
+
+The first successful sync after deployment discovers younger candidates; no additional Shopify scopes are required. Watchlist and overdue orders share their CX notes, status, and contact history. A database migration preserves existing overdue entry dates and adds a separate overdue-entry timestamp for newly tracked watchlist orders. Orders that close before entering overdue remain in Completed orders but do not increase overdue clearance KPIs. Sync failures preserve existing records.

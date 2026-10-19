@@ -6,7 +6,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "start": "node --env-file-if-exists=.env server/index.mjs",
-    "test": "node test/core.test.mjs && node test/production.test.mjs && node test/order-sort.test.mjs && node test/team.test.mjs",
+    "test": "node test/core.test.mjs && node test/production.test.mjs && node test/order-sort.test.mjs && node test/team.test.mjs && node test/watchlist.test.mjs",
     "test:http": "node test/http.test.mjs"
   },
   "dependencies": {

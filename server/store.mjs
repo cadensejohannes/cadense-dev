@@ -1,3 +1,4 @@
+import {queueStage} from './watchlist.mjs';
 import {recordMetricSnapshot} from './metrics.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
@@ -16,6 +17,7 @@ export function openStore(path){
  CREATE TABLE IF NOT EXISTS sync_runs(id INTEGER PRIMARY KEY, started TEXT, finished TEXT, status TEXT);`);
  if(!db.prepare('PRAGMA table_info(locks)').all().some(c=>c.name==='owner'))db.exec('ALTER TABLE locks ADD COLUMN owner TEXT');
  const metricColumns=new Set(db.prepare('PRAGMA table_info(metric_snapshots)').all().map(c=>c.name));for(const column of ['needs_followup','awaiting_response','oldest_days'])if(!metricColumns.has(column))db.exec(`ALTER TABLE metric_snapshots ADD COLUMN ${column} INTEGER`);
+ if(!db.prepare('PRAGMA table_info(orders)').all().some(c=>c.name==='overdue_entered')){db.exec('BEGIN IMMEDIATE');try{db.exec('ALTER TABLE orders ADD COLUMN overdue_entered TEXT');db.exec('UPDATE orders SET overdue_entered=entered');db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
  return db;
 }
 export function eligible(order,now=Date.now(),threshold=7){return !order.cancelledAt && now-Date.parse(order.createdAt)>threshold*86400000 && order.items.some(i=>i.requiresShipping&&i.remaining>0);}
@@ -23,20 +25,21 @@ export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7
  db.exec('BEGIN IMMEDIATE');try{guard();
  for(const order of orders){
  const old=db.prepare('SELECT * FROM orders WHERE id=?').get(order.id);
- const active=eligible(order,Date.parse(now),threshold);
+ const stage=queueStage({...order,closed:null},Date.parse(now),threshold);const active=Boolean(stage);
  if(!old&&!active)continue;
  const outstanding=order.items.some(i=>i.requiresShipping&&i.remaining>0);
  // A display status alone cannot close an order with outstanding physical items.
  const disposition=order.cancelledAt?'Canceled':!outstanding?(order.displayFulfillmentStatus==='FULFILLED'?'Fulfilled':'No outstanding items'):null;
  if(old){db.prepare('UPDATE orders SET snapshot=?,closed=?,disposition=?,checked=? WHERE id=?').run(JSON.stringify(order),active?null:disposition?(old.closed||now):old.closed,active?null:disposition,now,order.id);}
  else db.prepare('INSERT INTO orders(id,snapshot,entered,checked) VALUES(?,?,?,?)').run(order.id,JSON.stringify(order),now,now);
+ if(stage==='overdue')db.prepare('UPDATE orders SET overdue_entered=COALESCE(overdue_entered,?) WHERE id=?').run(now,order.id);
  if(old&&Boolean(old.closed)!==!active&& (active||disposition))db.prepare('INSERT INTO activity(order_id,kind,body,actor,at) VALUES(?,?,?,?,?)').run(order.id,'sync',active?'Returned to active queue':`Moved to history · ${disposition}`,'Shopify sync',now);
  }
- recordMetricSnapshot(db,now);
+ recordMetricSnapshot(db,now,threshold);
  db.prepare("INSERT INTO meta(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(now);db.exec('COMMIT');
  }catch(e){db.exec('ROLLBACK');throw e;}
 }
-export function listOrders(db){return db.prepare('SELECT * FROM orders').all().map(r=>({...JSON.parse(r.snapshot),cxStatus:r.cx_status,contact:r.contact,entered:r.entered,closed:r.closed,disposition:r.disposition,checked:r.checked}));}
+export function listOrders(db){return db.prepare('SELECT * FROM orders').all().map(r=>({...JSON.parse(r.snapshot),cxStatus:r.cx_status,contact:r.contact,entered:r.entered,overdueEntered:r.overdue_entered,closed:r.closed,disposition:r.disposition,checked:r.checked}));}
 export function recordAction(db,id,{status,contact,note},actor){
  if(!db.prepare('SELECT id FROM orders WHERE id=?').get(id))throw new Error('Order not found');
  if(status!==undefined&&!statuses.includes(status))throw new Error('Invalid status');

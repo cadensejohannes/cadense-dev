@@ -24,10 +24,10 @@ export class Shopify{
  if(this.requireAllOrdersScope)required.push('read_all_orders');
  const missing=required.filter(s=>!scopes.has(s));
  if(missing.length)throw new SyncError('SHOPIFY_SCOPES_MISSING',`The installed app is missing: ${missing.join(', ')}. Release the correct scopes and approve them on the store.`);
- const cutoff=new Date(Date.now()-threshold*86400000).toISOString();
+ const cutoff=new Date(Date.now()-Math.min(threshold,2)*86400000).toISOString();
  // Discover overdue candidates; refresh every tracked ID separately, including archived reversals.
- onProgress({stage:'discovering overdue candidates'});
- const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:`created_at:<'${cutoff}' -fulfillment_status:fulfilled -status:cancelled`},d=>d.orders,'Overdue order discovery',count=>onProgress({stage:'discovering overdue candidates',discovered:count}));
+ onProgress({stage:'discovering overdue and watchlist candidates'});
+ const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:`created_at:<'${cutoff}' -fulfillment_status:fulfilled -status:cancelled`},d=>d.orders,'Overdue order discovery',count=>onProgress({stage:'discovering overdue and watchlist candidates',discovered:count}));
  const ids=[...new Set([...found.map(o=>o.id),...trackedIds])];const snapshots=[];onProgress({stage:'fetching order details',processed:0,total:ids.length});for(const id of ids){snapshots.push(await this.order(id));if(snapshots.length%25===0||snapshots.length===ids.length)onProgress({stage:'fetching order details',processed:snapshots.length,total:ids.length});}return snapshots;}
 }
 export function syncState(db,now=Date.now()){
