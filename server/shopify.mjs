@@ -1,7 +1,9 @@
+import {inventoryScopes,stockSummary} from './inventory.mjs';
 import {randomUUID} from 'node:crypto';
 import {SyncError,safeSyncMessage,graphqlFailure} from './sync-errors.mjs';
 import {tokenProvider} from './shopify-token.mjs';
 const pageInfo='pageInfo { hasNextPage endCursor }';
+export const inventoryQuery=`query InventoryLevels($id:ID!,$after:String){inventoryItem(id:$id){inventoryLevels(first:100,after:$after){nodes{location{id name isActive fulfillsOnlineOrders} quantities(names:["on_hand","available","committed"]){name quantity}} ${pageInfo}}}}`;
 const fields=`id name tags createdAt cancelledAt displayFulfillmentStatus customer { displayName }`;
 export class Shopify{
  constructor({domain,token,clientId,clientSecret,version='2026-10',fetcher=fetch,requireAllOrdersScope=false}){if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(domain||''))throw new Error('Invalid Shopify domain');this.url=`https://${domain}/admin/api/${version}/graphql.json`;this.getToken=tokenProvider({domain,accessToken:token,clientId,clientSecret,fetcher});this.fetcher=fetcher;this.requireAllOrdersScope=requireAllOrdersScope;}
@@ -11,10 +13,11 @@ export class Shopify{
  async pages(query,variables,pick,stage='Shopify data',onPage=()=>{}){let after=null,results=[],seen=new Set();do{const connection=pick(await this.query(query,{...variables,after},stage));if(!connection||!Array.isArray(connection.nodes)||!connection.pageInfo||connection.nodes.some(n=>!n))throw new SyncError('SHOPIFY_RESPONSE_INCOMPLETE',`${stage}: Incomplete Shopify response; the queue is preserved.`);results.push(...connection.nodes);onPage(results.length);if(!connection.pageInfo.hasNextPage)break;after=connection.pageInfo.endCursor;if(!after||seen.has(after))throw new SyncError('SHOPIFY_PAGINATION',`${stage}: invalid Shopify pagination; the queue is preserved.`);seen.add(after);}while(true);return results;}
  async order(id){const data=await this.query(`query($id:ID!){order(id:$id){${fields}}}`,{id},'Order and customer information');if(!data.order)throw new SyncError('SHOPIFY_ORDER_UNAVAILABLE','Shopify did not return a requested order. It may have been deleted or become inaccessible; the queue is preserved.');const order=data.order;
  if(!order.id||!Number.isFinite(Date.parse(order.createdAt)))throw new SyncError('SHOPIFY_ORDER_INCOMPLETE','Shopify returned incomplete order identity or creation data; the queue is preserved.');
- const items=await this.pages(`query($id:ID!,$after:String){order(id:$id){lineItems(first:100,after:$after){nodes{id name sku requiresShipping unfulfilledQuantity} ${pageInfo}}}}`,{id},d=>d.order?.lineItems,'Outstanding order items');
+ const items=await this.pages(`query($id:ID!,$after:String){order(id:$id){lineItems(first:100,after:$after){nodes{id name sku requiresShipping unfulfilledQuantity ${this.inventoryEnabled?'variant{inventoryItem{id tracked}}':''}} ${pageInfo}}}}`,{id},d=>d.order?.lineItems,'Outstanding order items');
  const locations=await this.pages(`query($id:ID!,$after:String){order(id:$id){fulfillmentOrders(first:100,after:$after){nodes{id assignedLocation{name}} ${pageInfo}}}}`,{id},d=>d.order?.fulfillmentOrders,'Fulfillment locations');
  if(items.some(i=>typeof i.requiresShipping!=='boolean'||!Number.isInteger(i.unfulfilledQuantity)||i.unfulfilledQuantity<0))throw new SyncError('SHOPIFY_QUANTITIES_INCOMPLETE','Shopify returned invalid outstanding item quantities; the queue is preserved.');
- return {...order,customer:order.customer?.displayName||'Customer unavailable',items:items.map(i=>({id:i.id,name:i.name,sku:i.sku,requiresShipping:i.requiresShipping,remaining:i.unfulfilledQuantity})),locations:[...new Set(locations.map(l=>l.assignedLocation?.name).filter(Boolean))]};}
+ const enriched=[];for(const i of items){let inventory={state:'unknown',reason:this.inventoryAccess?.status==='missing_scopes'?'Inventory permissions not granted':'Inventory not checked'};if(this.inventoryEnabled&&i.requiresShipping&&i.unfulfilledQuantity>0&&!order.cancelledAt){const item=i.variant?.inventoryItem;if(!item||!item.id||typeof item.tracked!=='boolean'||item.tracked===false)inventory=stockSummary(item,[]);else{if(!this.inventoryCache.has(item.id)){const levels=await this.pages(inventoryQuery,{id:item.id},d=>d.inventoryItem?.inventoryLevels,'Inventory levels');this.inventoryCache.set(item.id,{...stockSummary(item,levels),itemId:item.id});}inventory=this.inventoryCache.get(item.id);}}enriched.push({id:i.id,name:i.name,sku:i.sku,requiresShipping:i.requiresShipping,remaining:i.unfulfilledQuantity,inventory});}
+ return {...order,customer:order.customer?.displayName||'Customer unavailable',items:enriched,locations:[...new Set(locations.map(l=>l.assignedLocation?.name).filter(Boolean))]};}
  async snapshots(trackedIds,threshold=7,onProgress=()=>{}){
  onProgress({stage:'checking permissions'});
  const installation=await this.query('query { currentAppInstallation { accessScopes { handle } } }',{},'Installed app permissions');
@@ -24,11 +27,11 @@ export class Shopify{
  if(this.requireAllOrdersScope)required.push('read_all_orders');
  const missing=required.filter(s=>!scopes.has(s));
  if(missing.length)throw new SyncError('SHOPIFY_SCOPES_MISSING',`The installed app is missing: ${missing.join(', ')}. Release the correct scopes and approve them on the store.`);
- const cutoff=new Date(Date.now()-Math.min(threshold,2)*86400000).toISOString();
- // Discover overdue candidates; refresh every tracked ID separately, including archived reversals.
- onProgress({stage:'discovering overdue and watchlist candidates'});
- const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:`created_at:<'${cutoff}' -fulfillment_status:fulfilled -status:cancelled`},d=>d.orders,'Overdue order discovery',count=>onProgress({stage:'discovering overdue and watchlist candidates',discovered:count}));
- const ids=[...new Set([...found.map(o=>o.id),...trackedIds])];const snapshots=[];onProgress({stage:'fetching order details',processed:0,total:ids.length});for(const id of ids){snapshots.push(await this.order(id));if(snapshots.length%25===0||snapshots.length===ids.length)onProgress({stage:'fetching order details',processed:snapshots.length,total:ids.length});}return snapshots;}
+ this.inventoryCache=new Map();const inventoryMissing=inventoryScopes.filter(s=>!scopes.has(s));this.inventoryEnabled=!inventoryMissing.length;this.inventoryAccess={status:this.inventoryEnabled?'ready':'missing_scopes',missing:inventoryMissing};
+ // Discover all unshipped candidates, including new VIP and stock-shortage orders; refresh every tracked ID separately, including archived reversals.
+ onProgress({stage:'discovering unshipped orders'});
+ const found=await this.pages(`query($search:String!,$after:String){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id} ${pageInfo}}}`,{search:'-fulfillment_status:fulfilled -status:cancelled'},d=>d.orders,'Overdue order discovery',count=>onProgress({stage:'discovering unshipped orders',discovered:count}));
+ const ids=[...new Set([...found.map(o=>o.id),...trackedIds])];const snapshots=[];onProgress({stage:'fetching order details',processed:0,total:ids.length});for(const id of ids){snapshots.push(await this.order(id));if(snapshots.length%25===0||snapshots.length===ids.length)onProgress({stage:'fetching order details',processed:snapshots.length,total:ids.length});}snapshots.inventoryAccess=this.inventoryAccess;return snapshots;}
 }
 export function syncState(db,now=Date.now()){
  const lock=db.prepare("SELECT expires FROM locks WHERE name='sync'").get();

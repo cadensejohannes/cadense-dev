@@ -1,3 +1,4 @@
+import {isUnshipped} from './inventory.mjs';
 import {queueStage} from './watchlist.mjs';
 import {recordMetricSnapshot} from './metrics.mjs';
 import {DatabaseSync} from 'node:sqlite';
@@ -25,7 +26,7 @@ export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7
  db.exec('BEGIN IMMEDIATE');try{guard();
  for(const order of orders){
  const old=db.prepare('SELECT * FROM orders WHERE id=?').get(order.id);
- const stage=queueStage({...order,closed:null},Date.parse(now),threshold);const active=Boolean(stage);
+ const stage=queueStage({...order,closed:null},Date.parse(now),threshold);const active=isUnshipped({...order,closed:null});
  if(!old&&!active)continue;
  const outstanding=order.items.some(i=>i.requiresShipping&&i.remaining>0);
  // A display status alone cannot close an order with outstanding physical items.
@@ -35,6 +36,7 @@ export function applySnapshot(db,orders,now=new Date().toISOString(),threshold=7
  if(stage==='overdue')db.prepare('UPDATE orders SET overdue_entered=COALESCE(overdue_entered,?) WHERE id=?').run(now,order.id);
  if(old&&Boolean(old.closed)!==!active&& (active||disposition))db.prepare('INSERT INTO activity(order_id,kind,body,actor,at) VALUES(?,?,?,?,?)').run(order.id,'sync',active?'Returned to active queue':`Moved to history · ${disposition}`,'Shopify sync',now);
  }
+ if(orders.inventoryAccess)db.prepare("INSERT INTO meta(key,value) VALUES('inventory_access',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(orders.inventoryAccess));
  recordMetricSnapshot(db,now,threshold);
  db.prepare("INSERT INTO meta(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(now);db.exec('COMMIT');
  }catch(e){db.exec('ROLLBACK');throw e;}

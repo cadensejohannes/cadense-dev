@@ -110,3 +110,13 @@ Seven-day trends start collecting after this release and do not infer missing hi
 The Watchlist includes unshipped physical orders after three weekdays, excluding the placement day and weekends, using America/Los_Angeles calendar dates. Public holidays count as weekdays. At more than the configured overdue threshold (seven elapsed calendar days by default), an order moves to the overdue queue. Partial shipments remain tracked. Tag exclusions apply to both queues.
 
 The first successful sync after deployment discovers younger candidates; no additional Shopify scopes are required. Watchlist and overdue orders share their CX notes, status, and contact history. A database migration preserves existing overdue entry dates and adds a separate overdue-entry timestamp for newly tracked watchlist orders. Orders that close before entering overdue remain in Completed orders but do not increase overdue clearance KPIs. Sync failures preserve existing records.
+
+### Inventory shortages and VIP orders
+
+Both views include unshipped physical orders of all ages, including partial fulfillments. Discovery now checks all unshipped, non-canceled orders; recent orders may therefore increase sync time. Existing order IDs and CX notes/statuses are retained. Recent orders do not increase overdue metrics or overdue-clearance KPIs.
+
+VIP matches the complete Shopify order tag `VIP` ignoring case. Current dashboard tag exclusions apply, and can be toggled off to show excluded preorders.
+
+Inventory shortages require the additional read-only Shopify scopes `read_products`, `read_inventory`, and `read_locations`. Release the scopes in the app's active version and approve them on the store, then run a successful sync. Missing scopes mark inventory unknown while allowing existing order/VIP synchronization.
+
+A confirmed shortage means an outstanding physical item has zero shippable stock across all active online fulfillment locations. Shippable stock is `max(0, available + committed)` at each location; this includes inventory committed to existing orders but excludes unavailable inventory such as damaged or reserved stock. Incoming inventory is not counted. This is not an allocation engine: it does not promise coverage of competing orders or of the specifically assigned warehouse. Missing/deleted variants, untracked items, missing levels and incomplete quantities are not assumed to be zero stock. Unknown items are available in Needs inventory check; untracked items are labeled in the drawer. Inventory levels are paginated and cached by inventory-item ID for each sync only.
