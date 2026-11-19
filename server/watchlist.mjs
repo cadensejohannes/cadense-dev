@@ -8,7 +8,7 @@ export function businessDaysWaiting(createdAt,now=Date.now()){
  for(let i=weeks*7+1;i<=days;i++){const weekday=new Date(start+i*day).getUTCDay();if(weekday!==0&&weekday!==6)count++;}return count;
 }
 export function queueStage(order,now=Date.now(),threshold=7){
- if(order.closed||order.cancelledAt||!order.items.some(i=>i.requiresShipping&&i.remaining>0))return null;
+ if(order.shopifyUnavailableSince||order.closed||order.cancelledAt||!order.items.some(i=>i.requiresShipping&&i.remaining>0))return null;
  if(now-Date.parse(order.createdAt)>threshold*day)return 'overdue';
  return businessDaysWaiting(order.createdAt,now)>=3?'watchlist':null;
 }
