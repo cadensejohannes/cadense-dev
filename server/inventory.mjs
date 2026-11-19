@@ -10,6 +10,6 @@ export function stockSummary(item,levels){
  if(locations.some(l=>l.shippable===null))return{state:'unknown',reason:'Inventory quantities incomplete'};
  const shippable=locations.reduce((n,l)=>n+l.shippable,0);return{state:shippable===0?'out_of_stock':'in_stock',shippable,locations};
 }
-export function inventoryOverview(order){const pending=order.items.filter(i=>i.requiresShipping&&i.remaining>0);return{shortages:pending.filter(i=>i.inventory?.state==='out_of_stock'),unknown:pending.filter(i=>!i.inventory||i.inventory.state==='unknown')};}
+export function inventoryOverview(order){if(order.shopifyUnavailableSince)return{shortages:[],unknown:[]};const pending=order.items.filter(i=>i.requiresShipping&&i.remaining>0);return{shortages:pending.filter(i=>i.inventory?.state==='out_of_stock'),unknown:pending.filter(i=>!i.inventory||i.inventory.state==='unknown')};}
 export function isVip(order){return(order.tags||[]).some(t=>t.trim().toLowerCase()==='vip');}
-export function isUnshipped(order){return !order.closed&&!order.cancelledAt&&order.items.some(i=>i.requiresShipping&&i.remaining>0);}
+export function isUnshipped(order){return !order.shopifyUnavailableSince&&!order.closed&&!order.cancelledAt&&order.items.some(i=>i.requiresShipping&&i.remaining>0);}
