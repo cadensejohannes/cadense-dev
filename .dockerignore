@@ -1,0 +1,10 @@
+node_modules
+.git
+.env
+users.json
+data
+work
+attachments
+authorized-users.json
+output
+dist

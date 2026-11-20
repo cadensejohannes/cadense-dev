@@ -1,0 +1,5 @@
+import {randomBytes,scryptSync,timingSafeEqual,createHmac} from 'node:crypto';
+export function hashPassword(password){const salt=randomBytes(16).toString('hex');return `${salt}:${scryptSync(password,salt,64).toString('hex')}`;}
+export function verifyPassword(password,hash){try{const [salt,key]=hash.split(':');const expected=Buffer.from(key,'hex');const actual=scryptSync(password,salt,64);return expected.length===actual.length&&timingSafeEqual(actual,expected);}catch{return false;}}
+export function tokenFor(user,secret){const payload=Buffer.from(JSON.stringify({...user,expires:Date.now()+8*3600000})).toString('base64url');return `${payload}.${createHmac('sha256',secret).update(payload).digest('base64url')}`;}
+export function readToken(token,secret){try{const [payload,signature]=token.split('.');const expected=createHmac('sha256',secret).update(payload).digest();const actual=Buffer.from(signature,'base64url');if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return null;const user=JSON.parse(Buffer.from(payload,'base64url'));return user.expires>Date.now()?user:null;}catch{return null;}}

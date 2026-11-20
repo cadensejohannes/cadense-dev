@@ -1,0 +1,26 @@
+name: Verify unavailable-order queue changes
+
+on:
+  push:
+    branches:
+      - fix/hide-unavailable-orders
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:http

@@ -1,0 +1,9 @@
+node_modules/
+.env
+users.json
+data/
+work/
+*.sqlite*
+output/
+dist/
+authorized-users.json
